@@ -1,1 +1,824 @@
-test
+local success, result = pcall(function()
+    local player = game.Players.LocalPlayer
+    local UserInputService = game:GetService("UserInputService")
+    local RunService = game:GetService("RunService")
+    local Camera = workspace.CurrentCamera
+    local TweenService = game:GetService("TweenService")
+
+    -- Load external scripts
+    if not game:GetService("CoreGui"):FindFirstChild("Cobalt") then
+        --loadstring(game:HttpGet("https://raw.githubusercontent.com/Exunys/Exunys-ESP/main/src/ESP.lua"))()
+        --ExunysDeveloperESP()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
+        loadstring(game:HttpGet("https://github.com/notpoiu/cobalt/releases/latest/download/Cobalt.luau"))()
+        task.spawn(function()
+        task.wait(1)
+        game:GetService("CoreGui"):FindFirstChild("Cobalt").Enabled = false
+        end)
+    end
+
+
+    local modes = {"None", "AutoFarm", "Hulk","[Debug]Bolt"} -- add "Error" if you want to test error
+    local currentModeIndex = 1
+    local decal = nil
+    local EndedState = false
+
+    task.spawn(function()
+        local function getNearestGenerator()
+            local character = player.Character or player.CharacterAdded:Wait()
+            local hrp = character:WaitForChild("HumanoidRootPart")
+
+            local nearest = nil
+            local nearestDist = math.huge
+
+            for _, obj in ipairs(workspace:GetDescendants()) do
+                if obj:IsA("Model") and obj.Name == "Generator" and obj:FindFirstChild("Remotes") and obj.Remotes:FindFirstChild("RE") then
+                    local mainPart = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
+                    if mainPart then
+                        local dist = (hrp.Position - mainPart.Position).Magnitude
+                        if dist < nearestDist then
+                            nearest = obj
+                            nearestDist = dist
+                        end
+                    end
+                end
+            end
+
+            return nearest
+        end
+        while not EndedState do
+            task.wait(0.3)
+            local e = getNearestGenerator()
+            if e then e.Remotes.RE:FireServer() end
+            game:GetService("ReplicatedStorage").Modules.Network.RemoteEvent:FireServer("Entangled")
+        end
+        print("engine loop ended")
+    end)
+    task.spawn(function()
+        while not EndedState do
+            task.wait(0.5)
+            game:GetService("ReplicatedStorage").Modules.Network.RemoteEvent:FireServer("Entangled")
+        end
+        print("1x1x1x1 loop ended")
+    end)
+
+    local modeGroupActions = {
+        ---------------------------------------------------------------------
+        -- 🧍 AUTO FARM - SURVIVORS
+        ---------------------------------------------------------------------
+        ["AutoFarm-Survivors"] = {
+    _connection = nil,
+    _running = false,
+    _lastPosition = nil,
+
+    start = function(self)
+        self._running = true
+        local player = game.Players.LocalPlayer
+        local character = player.Character or player.CharacterAdded:Wait()
+        local rootPart = character:WaitForChild("HumanoidRootPart")
+
+        local maxDistance = 2000
+        local raycastParams = RaycastParams.new()
+        raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+        raycastParams.FilterDescendantsInstances = {character}
+
+        -- Check a small flat area around position for clearance
+        local function isAreaClearFlat(centerPos, radius)
+            local offsets = {
+                Vector3.new(0, 0, 0),
+                Vector3.new(radius, 0, 0),
+                Vector3.new(-radius, 0, 0),
+                Vector3.new(0, 0, radius),
+                Vector3.new(0, 0, -radius),
+            }
+
+            for _, offset in ipairs(offsets) do
+                local pos = centerPos + offset
+                local region = Region3.new(
+                    pos - Vector3.new(1, 2, 1),
+                    pos + Vector3.new(1, 4, 1)
+                )
+                local parts = workspace:FindPartsInRegion3WithIgnoreList(region, {character}, 10)
+                if #parts > 0 then
+                    return false -- something blocking here
+                end
+            end
+            return true
+        end
+
+        local function findSafePosition(fromPos, direction, maxDist)
+            local increment = 5
+            local radius = 2
+            local bestCFrame = nil
+            local bestDistance = -1
+            local bestHeight = -math.huge
+
+            for d = maxDist, 0, -increment do
+                local checkPosXZ = fromPos + direction * d
+                local rayOrigin = Vector3.new(checkPosXZ.X, fromPos.Y + 50, checkPosXZ.Z)
+                local rayDirection = Vector3.new(0, -100, 0)
+                local result = workspace:Raycast(rayOrigin, rayDirection, raycastParams)
+
+                if result then
+                    local groundY = result.Position.Y
+                    local candidatePos = Vector3.new(result.Position.X, groundY + 3, result.Position.Z)
+                    if isAreaClearFlat(candidatePos, radius) then
+                        if d > bestDistance or (d == bestDistance and candidatePos.Y > bestHeight) then
+                            bestDistance = d
+                            bestHeight = candidatePos.Y
+                            bestCFrame = CFrame.new(candidatePos)
+                        end
+                    end
+                end
+            end
+
+            return bestCFrame
+        end
+
+        task.spawn(function()
+            while self._running do
+                task.wait(0.1)
+                if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then break end
+
+                local root = player.Character.HumanoidRootPart
+                local killers = workspace.Players:FindFirstChild("Killers")
+
+                if killers and #killers:GetChildren() > 0 then
+                    local target = killers:GetChildren()[1]
+                    if target:IsA("Model") and target:FindFirstChild("HumanoidRootPart") then
+                        local targetPos = target.HumanoidRootPart.Position
+                        local currentPos = root.Position
+                        local dir = (currentPos - targetPos)
+                        if dir.Magnitude == 0 then
+                            dir = Vector3.new(0, 0, 1) -- fallback direction
+                        else
+                            dir = dir.Unit
+                        end
+
+                        local newCFrame = findSafePosition(currentPos, dir, maxDistance)
+
+                        if newCFrame and (not self._lastPosition or (newCFrame.Position - self._lastPosition).Magnitude > 3) then
+                            root.CFrame = newCFrame
+                            self._lastPosition = newCFrame.Position
+                            task.wait(0.2)
+                        end
+                    end
+                end
+            end
+        end)
+    end,
+
+    stop = function(self)
+        self._running = false
+        self._lastPosition = nil
+    end,
+},
+
+
+        ---------------------------------------------------------------------
+        -- 💀 AUTO FARM - KILLERS
+        ---------------------------------------------------------------------
+        ["AutoFarm-Killers"] = {
+            start = function()
+                local character = player.Character or player.CharacterAdded:Wait()
+                character:FindFirstChildOfClass("Humanoid").Health = 0
+            end,
+            stop = function() end,
+        },
+
+        ---------------------------------------------------------------------
+        -- 💪 HULK MODE - ANY GROUP
+        ---------------------------------------------------------------------
+        ["Hulk-AnyGroup"] = {
+
+        _connectionBegan = nil,
+        _connectionEnded = nil,
+        _connectionUpdate = nil,
+        _running = false,
+        _keysPressed = {},
+
+        start = function(self)
+            if self._running then return end
+            self._running = true
+            self._keysPressed = {}
+
+            local player = game.Players.LocalPlayer
+            local UserInputService = game:GetService("UserInputService")
+            local RunService = game:GetService("RunService")
+
+            self._connectionBegan = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+                if gameProcessed then return end
+                if input.UserInputType == Enum.UserInputType.Keyboard then
+                    self._keysPressed[input.KeyCode] = true
+                end
+            end)
+
+            self._connectionEnded = UserInputService.InputEnded:Connect(function(input, gameProcessed)
+                if gameProcessed then return end
+                if input.UserInputType == Enum.UserInputType.Keyboard then
+                    self._keysPressed[input.KeyCode] = false
+                end
+            end)
+
+            local speed = 50 -- studs per second
+
+            self._connectionUpdate = RunService.Heartbeat:Connect(function(dt)
+                if not self._running then return end
+
+                local char = player.Character
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                if not hrp then return end
+
+                local moveDir = Vector3.new(0, 0, 0)
+
+                if self._keysPressed[Enum.KeyCode.S] or self._keysPressed[Enum.KeyCode.W] or self._keysPressed[Enum.KeyCode.A] or self._keysPressed[Enum.KeyCode.D] then
+                    if not (UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter and self._keysPressed[Enum.KeyCode.S]) then
+                        moveDir = moveDir + Vector3.new(0, 0, -1)
+                    elseif not (self._keysPressed[Enum.KeyCode.A] or self._keysPressed[Enum.KeyCode.D]) and (self._keysPressed[Enum.KeyCode.S] or self._keysPressed[Enum.KeyCode.W]) then
+                        moveDir = moveDir + Vector3.new(0, 0, 1)
+                    elseif not self._keysPressed[Enum.KeyCode.A] then
+                        moveDir = moveDir + Vector3.new(1, 0, 0)
+                    elseif not self._keysPressed[Enum.KeyCode.D] then
+                        moveDir = moveDir + Vector3.new(-1, 0, 0)
+                    end
+                end
+
+                if moveDir.Magnitude > 0 then
+                    moveDir = moveDir.Unit
+                    local displacement = hrp.CFrame:VectorToWorldSpace(moveDir) * speed * dt
+                    hrp.CFrame = hrp.CFrame + displacement
+                end
+            end)
+        end,
+
+        stop = function(self)
+            self._running = false
+
+            if self._connectionBegan then
+                self._connectionBegan:Disconnect()
+                self._connectionBegan = nil
+            end
+            if self._connectionEnded then
+                self._connectionEnded:Disconnect()
+                self._connectionEnded = nil
+            end
+            if self._connectionUpdate then
+                self._connectionUpdate:Disconnect()
+                self._connectionUpdate = nil
+            end
+
+            self._keysPressed = {}
+        end,
+    },
+
+        ---------------------------------------------------------------------
+        -- 🚫 NONE - FALLBACK MODE
+        ---------------------------------------------------------------------
+        ["None-AnyGroup"] = {
+            start = function() end,
+            stop = function() end,
+        },
+        ["[Debug]Bolt-AnyGroup"] = {
+            start = function() game:GetService("CoreGui"):FindFirstChild("Cobalt").Enabled = true end,
+            stop = function() game:GetService("CoreGui"):FindFirstChild("Cobalt").Enabled = false end,
+        },
+    }
+
+    local guiName = "ModeBillboardGui"
+    local guiName2 = "ConfigfBillboardGui"
+    local decalName = "BackDecal"
+
+    local billboardGui
+    local textLabel
+    local frame
+
+    local errorState = false
+    local currentErrorMessage = ""
+
+    local currentRunningKey = nil
+    local isRunning = false
+
+    local connections = {}
+
+    local updateTextLabel
+
+    local function tweenY(frame: Frame, duration: number, expand: boolean)
+        local fullSize = frame.Size
+        local collapsedSize = UDim2.new(fullSize.X.Scale, fullSize.X.Offset, 0, 0)
+
+        task.spawn(function()
+            -- Optional: immediately jump to start size if expanding
+            if expand then
+                frame.Size = collapsedSize
+            end
+
+            local targetSize = expand and fullSize or collapsedSize
+
+            local tween = TweenService:Create(
+                frame,
+                TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                { Size = targetSize }
+            )
+            tween:Play()
+            tween.Completed:Wait()
+
+            -- If retracting, wait a frame and reset size
+            if not expand then
+                RunService.Heartbeat:Wait()
+                frame.Size = fullSize
+            end
+        end)
+    end
+    local function cleanupOldBillboardsAndDecals(newCharacter)
+        for _, char in pairs(workspace:GetChildren()) do
+            if char:IsA("Model") and char ~= newCharacter then
+                local playerInChar = game.Players:GetPlayerFromCharacter(char)
+                if playerInChar == player then
+                    local head = char:FindFirstChild("Head")
+                    if head then
+                        local oldGui = head:FindFirstChild(guiName)
+                        if oldGui then oldGui:Destroy() end
+                        local oldGui2 = head:FindFirstChild(guiName2)
+                        if oldGui2 then oldGui2:Destroy() end
+                    end
+                    if decal then decal:Destroy() decal = nil end
+                end
+            end
+        end
+    end
+
+    local function createBillboardGui(character)
+        if EndedState then return end
+        local head = character:WaitForChild("Head")
+
+        if head:FindFirstChild(guiName) then
+            head[guiName]:Destroy()
+        end
+
+        local gui = Instance.new("BillboardGui")
+        gui.Name = guiName
+        gui.Adornee = head
+        gui.Size = UDim2.new(3, 0, 1, 0)
+        gui.StudsOffset = Vector3.new(0, 1, 0)
+        gui.AlwaysOnTop = true
+
+        frame = Instance.new("Frame")
+        frame.Size = UDim2.new(1, 0, 0.7, 0)
+        frame.Position = UDim2.new(0, 0, 0.3, 0)
+        frame.BackgroundTransparency = 0.5
+        frame.BackgroundColor3 = Color3.new(0, 0, 0)
+        frame.Parent = gui
+
+        textLabel = Instance.new("TextLabel")
+        textLabel.Size = UDim2.new(1, 0, 1, 0)
+        textLabel.BackgroundTransparency = 1
+        textLabel.TextColor3 = Color3.new(1, 1, 1)
+        textLabel.Font = Enum.Font.SourceSansBold
+        textLabel.TextScaled = true
+        textLabel.TextYAlignment = Enum.TextYAlignment.Center
+        textLabel.TextXAlignment = Enum.TextXAlignment.Center
+        textLabel.Parent = frame
+
+        textLabel2 = Instance.new("TextLabel")
+        textLabel2.Size = UDim2.new(1, 0, 0.3, 0)
+        textLabel2.BackgroundTransparency = 1
+        textLabel2.TextColor3 = Color3.new(1, 1, 1)
+        textLabel2.Font = Enum.Font.SourceSansBold
+        textLabel2.TextScaled = true
+        textLabel2.TextYAlignment = Enum.TextYAlignment.Center
+        textLabel2.TextXAlignment = Enum.TextXAlignment.Center
+        textLabel2.Parent = gui
+        textLabel2.Text = "press [U] for help/configs"
+
+
+
+
+        local guiconfig = Instance.new("BillboardGui")
+        guiconfig.Name = guiName2
+        guiconfig.Adornee = head
+        guiconfig.Size = UDim2.new(1.875*5.16, 0, 1*5.16, 0)
+        guiconfig.StudsOffset = Vector3.new(0, -1.5, 0)
+        guiconfig.AlwaysOnTop = true
+        guiconfig.Parent = character:WaitForChild("Head")
+        guiconfig.Enabled = false
+    ----------------------------------------------------------------------------------------
+        frameconfig = Instance.new("Frame")
+        frameconfig.Size = UDim2.new(0.3, 0, 1, 0)
+        frameconfig.BackgroundTransparency = 0.5
+        frameconfig.BackgroundColor3 = Color3.new(0, 0, 0)
+        frameconfig.Parent = guiconfig
+
+        configtitel = Instance.new("TextLabel")
+        configtitel.Size = UDim2.new(1, 0, 0.1, 0)
+        configtitel.BackgroundTransparency = 1
+        configtitel.TextColor3 = Color3.new(1, 1, 1)
+        configtitel.Font = Enum.Font.SourceSansBold
+        configtitel.TextScaled = true
+        configtitel.TextYAlignment = Enum.TextYAlignment.Center
+        configtitel.TextXAlignment = Enum.TextXAlignment.Center
+        configtitel.Parent = frameconfig
+        configtitel.Text = "CONFIGS"
+    ----------------------------------------------------------------------------------------
+        framehelp = Instance.new("Frame")
+        framehelp.Size = UDim2.new(0.3, 0, 1, 0)
+        framehelp.Position = UDim2.new(1-0.3, 0, 0, 0)
+        framehelp.BackgroundTransparency = 0.5
+        framehelp.BackgroundColor3 = Color3.new(0, 0, 0)
+        framehelp.Parent = guiconfig
+
+        local layout = Instance.new("UIListLayout")
+        layout.FillDirection = Enum.FillDirection.Vertical
+        layout.SortOrder = Enum.SortOrder.LayoutOrder
+        layout.VerticalAlignment = Enum.VerticalAlignment.Top
+        layout.Padding = UDim.new(0, 4) -- optional spacing between items
+        layout.Parent = framehelp
+
+        helptext = Instance.new("TextLabel")
+        helptext.Size = UDim2.new(1, 0, 0.05, 0)
+        helptext.BackgroundTransparency = 1
+        helptext.TextColor3 = Color3.new(1, 1, 1)
+        helptext.Font = Enum.Font.SourceSansBold
+        helptext.TextScaled = true
+        helptext.TextYAlignment = Enum.TextYAlignment.Top
+        helptext.TextXAlignment = Enum.TextXAlignment.Center
+        helptext.Parent = framehelp
+        helptext.Text = "ESP"
+
+        helptext = Instance.new("TextLabel")
+        helptext.Size = UDim2.new(1, 0, 0.2, 0)
+        helptext.BackgroundTransparency = 1
+        helptext.TextColor3 = Color3.new(1, 1, 1)
+        helptext.Font = Enum.Font.SourceSansBold
+        helptext.TextScaled = true
+        helptext.TextYAlignment = Enum.TextYAlignment.Top
+        helptext.TextXAlignment = Enum.TextXAlignment.Left
+        helptext.Parent = framehelp
+        helptext.Text = "red - killer\nyellow - finished generator\ngreen - unfinished generator\nblue - survivor\npurple - item"
+    ----------------------------------------------------------------------------------------
+        local function updateText()
+            local groupName = ""
+            if player.Character and player.Character.Parent then
+                groupName = player.Character.Parent.Name
+            end
+
+            if errorState then
+                textLabel.Text = 
+                    "Error:\n" .. currentErrorMessage .. "\n\n[T] to hide error"
+            else
+                textLabel.Text =
+                    modes[currentModeIndex] .. " [V]\n" ..
+                    groupName .. "\n" ..
+                    "Press [T] to end script"
+            end
+        end
+
+        updateTextLabel = updateText
+        updateText()
+        return gui,guiconfig
+    end
+
+    local function createBackDecal(character)
+        local torso = character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")
+        if not torso then
+            warn("[FORESKIN CODE][DEBUG] No torso found for decal.")
+            return
+        end
+
+        if torso:FindFirstChild(decalName) then
+            torso[decalName]:Destroy()
+        end
+
+        -- Remove any existing CharacterMeshes for R6 torso
+        task.spawn(function()
+            if torso.Name == "Torso" then
+                repeat task.wait() until character:FindFirstChild("CharacterMesh") ~= nil
+                for _, mesh in pairs(character:GetChildren()) do
+                    if mesh:IsA("CharacterMesh") then
+                        local parent = mesh.Parent
+                        mesh.Parent = workspace
+                        task.spawn(function()
+                        repeat task.wait() until EndedState
+                            if mesh and parent then mesh.Parent = parent end
+                        end)
+                    end
+                end
+            end
+        end)
+
+        decal = Instance.new("Decal")
+        decal.Name = decalName
+        decal.Texture = "rbxassetid://122279716434445" -- example decal texture
+        decal.Face = Enum.NormalId.Back
+        decal.Parent = torso
+    end
+
+    local function clearError()
+        errorState = false
+        currentErrorMessage = ""
+        if updateTextLabel then updateTextLabel() end
+    end
+
+    local function stopCurrentCode()
+        if currentRunningKey and isRunning then
+            local oldAction = modeGroupActions[currentRunningKey]
+            if oldAction and oldAction.stop then
+                warn("[FORESKIN CODE][DEBUG][" .. currentRunningKey .. "] ending")
+                local ok, err = pcall(function() oldAction:stop() end)
+                if not ok then
+                    warn("[FORESKIN CODE][DEBUG] Error stopping old mode-group action: ", err)
+                end
+            end
+            isRunning = false
+            currentRunningKey = nil
+        end
+    end
+
+    
+
+    local function isObscured(model: Model, targetPart: BasePart): boolean
+        local origin = Camera.CFrame.Position
+        -- Full vector, not unitized — ray length exactly = distance to part
+        local toPart = targetPart.Position - origin
+
+        local rayParams = RaycastParams.new()
+        -- ignore every descendant of the model
+        rayParams.FilterDescendantsInstances = { model }
+        rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+        rayParams.IgnoreWater = true
+
+        local result = workspace:Raycast(origin, toPart, rayParams)
+        -- if something *was* hit, it must be outside the model → obscured
+        return result ~= nil
+    end
+    local function setupHighlightVisibility(highlight: Highlight)
+        local parentModel = highlight.Parent
+        if not parentModel or not parentModel:IsA("Model") then return end
+
+        local originalParent = parentModel
+        local primaryPart = parentModel.PrimaryPart or parentModel:FindFirstChildWhichIsA("BasePart")
+        if not primaryPart then return end
+
+        task.spawn(function()
+            while highlight and highlight:IsDescendantOf(game) do
+                local obscured = isObscured(parentModel, primaryPart)
+                local distance = (Camera.CFrame.Position - primaryPart.Position).Magnitude
+                if obscured or distance > 500 then
+                    if highlight.Parent ~= originalParent then
+                        highlight.Parent = originalParent
+                        highlight.Enabled = true
+                    end
+                else
+                    if highlight.Parent ~= workspace then
+                        highlight.Enabled = false
+                        highlight.Parent = workspace
+                    end
+                end
+                local radius = 100
+                local defaulttransparency = 0.5
+                local maxtransparency = 0.9
+                local bordercolortransparency = 0.8
+                local e = math.clamp((distance/radius),0,maxtransparency)
+                --print(distance/radius)
+                highlight.FillTransparency = math.clamp(1-(e*defaulttransparency),defaulttransparency,maxtransparency)
+                if highlight.FillTransparency >= bordercolortransparency then
+                    highlight.OutlineColor = highlight.FillColor
+                else
+                    highlight.OutlineColor = Color3.new(1,1,1)
+                end
+                RunService.RenderStepped:Wait()
+            end
+        end)
+    end
+    local function updateesp()
+        if EndedState then return end
+        wait(0.1)
+        local killer = Workspace.Players.Killers:GetChildren()[1]
+        if killer and not killer:FindFirstChild("e25w") then
+            local e = Instance.new("Highlight")
+            e.FillColor = Color3.new(1, 0, 0)
+            e.Name = "e25w"
+            e.Adornee = killer
+            e.Parent = killer
+            setupHighlightVisibility(e)
+            task.spawn(function()
+                repeat task.wait() until EndedState
+                e:Destroy()
+            end)
+        end
+
+
+
+        for _, killer in Workspace.Players.Survivors:GetChildren() do
+            if killer and not killer:FindFirstChild("e25w") and killer ~= ( player.Character) then
+                local e = Instance.new("Highlight")
+                e.FillColor = Color3.new(0, 0, 1)
+                e.Name = "e25w"
+                e.Adornee = killer
+                e.Parent = killer
+                setupHighlightVisibility(e)
+                task.spawn(function()
+                    repeat task.wait() until EndedState
+                    e:Destroy()
+                end)
+            end
+        end
+
+
+
+        if Workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild("Ingame") and workspace.Map:FindFirstChild("Ingame"):FindFirstChild("Map")  then
+            for _, killer in workspace.Map:FindFirstChild("Ingame").Map:GetChildren() do
+                if killer and not killer:FindFirstChild("e25w") and killer.Name == "Generator" then
+                    local e = Instance.new("Highlight")
+                    e.FillColor = Color3.new(0, 1, 0)
+                    e.Name = "e25w"
+                    e.Adornee = killer
+                    e.Parent = killer
+                    setupHighlightVisibility(e)
+                    task.spawn(function()
+                        repeat
+                        task.wait()
+                        if killer.Instances.Generator.Progress.BarUI.Bar.Size == UDim2.new(1,0,1,0) then
+                            e.FillColor = Color3.new(1, 1, 0)
+                        end
+                        until EndedState
+                        e:Destroy()
+                    end)
+                end
+            end
+        end
+    end
+
+
+
+    local function runCurrentCode(key)
+        if not key then return end
+        local action = modeGroupActions[key]
+
+
+
+        local TextChatService = game:GetService("TextChatService")
+        -- Make sure ChatWindowConfiguration exists
+        local chatWindowConfig = TextChatService:FindFirstChild("ChatWindowConfiguration")
+        if not chatWindowConfig then
+            chatWindowConfig = Instance.new("ChatWindowConfiguration")
+            chatWindowConfig.Name = "ChatWindowConfiguration"
+            chatWindowConfig.Parent = TextChatService
+        end
+
+        -- Disable chat history window
+        chatWindowConfig.Enabled = true
+
+
+
+        if game.Lighting:FindFirstChild("Atmosphere") then
+            game.Lighting.Atmosphere.Density = 0
+        end
+
+
+
+        updateesp()
+
+
+        if action and action.start then
+            warn("[FORESKIN CODE][DEBUG][" .. key .. "] starting")
+            local ok, err = pcall(function() action:start() end)
+            if ok then
+                currentRunningKey = key
+                isRunning = true
+            else
+                warn("[FORESKIN CODE][DEBUG][" .. key .. "] Error running mode-group start function:", err)
+                errorState = true
+                currentErrorMessage = err
+                if updateTextLabel then updateTextLabel() end
+            end
+        else
+            currentRunningKey = nil
+            isRunning = false
+        end
+    end
+
+    local function updateModeGroup()
+        if errorState then return end
+
+        local groupName = ""
+        if player.Character and player.Character.Parent then
+            groupName = player.Character.Parent.Name
+        end
+        task.spawn(function()
+            local key = modes[currentModeIndex] .. "-" .. groupName
+            if key ~= currentRunningKey and modeGroupActions[key] ~= nil then
+                stopCurrentCode()
+                runCurrentCode(key)
+                if updateTextLabel then updateTextLabel() end
+                return
+            end
+        end)
+        task.spawn(function()
+            local key = modes[currentModeIndex] .. "-AnyGroup"
+            if key ~= currentRunningKey and modeGroupActions[key] ~= nil then
+                stopCurrentCode()
+                runCurrentCode(key)
+                if updateTextLabel then updateTextLabel() end
+                return
+            end
+        end)
+    end
+
+    function _G.end2()
+        stopCurrentCode()
+        if billboardGui.Parent:FindFirstChild(guiName2) then
+            billboardGui.Parent:FindFirstChild(guiName2):Destroy()
+        end
+        if billboardGui and billboardGui.Parent then
+            billboardGui:Destroy()
+            billboardGui = nil
+        end
+        if decal then
+            decal:Destroy()
+            decal = nil
+        end
+        currentModeIndex = 1
+        EndedState = true
+    end
+    antimenuspam = false
+    local function handleInput()
+        -- Disconnect old input connections
+        for _, conn in pairs(connections) do
+            conn:Disconnect()
+        end
+        connections = {}
+
+        local inputConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+            if EndedState then currentModeIndex=1;updateModeGroup();if updateTextLabel then updateTextLabel() end; return end
+            if input.UserInputType == Enum.UserInputType.Keyboard and UserInputService:GetFocusedTextBox() == nil then
+                if input.KeyCode == Enum.KeyCode.V then
+                    currentModeIndex = currentModeIndex + 1
+                    if currentModeIndex > #modes then
+                        currentModeIndex = 1
+                    end
+                    updateModeGroup()
+                    if updateTextLabel then updateTextLabel() end
+                elseif input.KeyCode == Enum.KeyCode.T then
+                    if errorState then
+                        clearError()
+                    else
+                        _G.end2()
+                    end
+                elseif input.KeyCode == Enum.KeyCode.U and not antimenuspam then
+                    antimenuspam = true
+                    local e = guiconfig.Enabled
+                    if not e then
+                        guiconfig.Enabled = true
+                    end
+                    tweenY(guiconfig:GetChildren()[1],0.3,not e)
+                    tweenY(guiconfig:GetChildren()[2],0.3,not e)
+                    task.wait(0.28)
+                    guiconfig.Enabled = not e
+                    antimenuspam = false
+                end
+            end
+        end)
+        table.insert(connections, inputConn)
+
+        local heartbeatConn = RunService.Heartbeat:Connect(function()
+            if updateTextLabel then updateTextLabel() end
+        end)
+        table.insert(connections, heartbeatConn)
+    end
+
+    local function onCharacterAdded(character)
+        if EndedState then return end
+        updateesp()
+        cleanupOldBillboardsAndDecals(character)
+
+        billboardGui,guiconfig = createBillboardGui(character)
+        billboardGui.Parent = character:WaitForChild("Head")
+
+        createBackDecal(character)
+
+        updateModeGroup()
+        if updateTextLabel then updateTextLabel() end
+    end
+
+    -- Initial setup
+    if player.Character then
+        onCharacterAdded(player.Character)
+    end
+
+    player.CharacterAdded:Connect(onCharacterAdded)
+
+    handleInput()
+
+end)
+
+if not success then
+    warn("[FORESKIN CODE][DEBUG] Initialization error:", result)
+    print("_G.end2 is:", _G.end2)
+    print("Type of _G.end2 is:", typeof(_G.end2))
+    local success, err = pcall(function()
+        _G.end2()
+    end)
+    if not success then
+        warn("Error when calling _G.end2:", err)
+    end
+end
